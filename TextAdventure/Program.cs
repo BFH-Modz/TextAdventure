@@ -2,55 +2,21 @@
 using System.Collections.Generic;
 using System.Linq;
 
-class Room
-{
-    public string Name { get; }
-    public string Description { get; }
-    public Dictionary<string, Room> Exits { get; } = new(); // "N","S","E","W"
-    public List<string> Items { get; } = new();
-
-    public Room(string name, string description)
-    {
-        Name = name;
-        Description = description;
-    }
-}
-
 class Program
 {
     static void Main()
     {
-        // Build the world
-        Room bedroom = new Room("Bedroom", "A small bedroom. The air feels still. There’s a door to the east.");
-        Room hall = new Room("Hall", "A narrow hall with creaky floorboards. Doors lead back west and north.");
-        Room kitchen = new Room("Kitchen", "A warm kitchen. It smells faintly like bread. There’s a door to the east.");
-        Room garden = new Room("Garden", "A quiet garden with overgrown grass. The sky feels bigger out here.");
+        Map map = Map.BuildDefault();
+        Room currentRoom = map.StartRoom;
 
-        bedroom.Exits["E"] = hall;
-
-        hall.Exits["W"] = bedroom;
-        hall.Exits["N"] = kitchen;
-
-        kitchen.Exits["S"] = hall;
-        kitchen.Exits["E"] = garden;
-
-        garden.Exits["W"] = kitchen;
-
-        // Items
-        bedroom.Items.Add("key");
-        kitchen.Items.Add("apple");
-
-        // Player state
-        Room currentRoom = bedroom;
-        List<string> inventory = new();
+        List<Item> inventory = new();
 
         Console.Clear();
         Console.WriteLine("=== Text Adventure ===");
-        Console.WriteLine("Commands: N/S/E/W, LOOK, INV, TAKE <item>, HELP, M (menu), Q (quit)\n");
+        Console.WriteLine("Commands: N/S/E/W, LOOK, INV, TAKE <item>, DROP <item>, HELP, Q\n");
 
         PrintRoom(currentRoom);
 
-        // Game loop
         while (true)
         {
             Console.Write("\n> ");
@@ -61,53 +27,41 @@ class Program
 
             input = input.Trim();
 
-            // Single-letter shortcuts
             if (input.Equals("Q", StringComparison.OrdinalIgnoreCase))
                 return;
 
-            if (input.Equals("M", StringComparison.OrdinalIgnoreCase))
-            {
-                Console.WriteLine("Menu not added yet for this project — but we can add one next.");
-                Console.WriteLine("For now: Q quits.");
-                continue;
-            }
-
-            // HELP
             if (input.Equals("HELP", StringComparison.OrdinalIgnoreCase))
             {
                 Console.WriteLine("Commands:");
-                Console.WriteLine("  N/S/E/W      Move");
-                Console.WriteLine("  LOOK         Reprint the room description");
-                Console.WriteLine("  INV          Show your inventory");
-                Console.WriteLine("  TAKE <item>  Pick up an item (example: TAKE key)");
-                Console.WriteLine("  Q            Quit");
+                Console.WriteLine("  N/S/E/W        Move");
+                Console.WriteLine("  LOOK           Reprint the room");
+                Console.WriteLine("  INV            Inventory");
+                Console.WriteLine("  TAKE <item>    Pick up an item (TAKE key)");
+                Console.WriteLine("  DROP <item>    Drop an item (DROP apple)");
+                Console.WriteLine("  Q              Quit");
                 continue;
             }
 
-            // LOOK
             if (input.Equals("LOOK", StringComparison.OrdinalIgnoreCase))
             {
                 PrintRoom(currentRoom);
                 continue;
             }
 
-            // INV
             if (input.Equals("INV", StringComparison.OrdinalIgnoreCase))
             {
-                if (inventory.Count == 0)
-                    Console.WriteLine("Your inventory is empty.");
-                else
-                    Console.WriteLine("Inventory: " + string.Join(", ", inventory));
+                if (inventory.Count == 0) Console.WriteLine("Your inventory is empty.");
+                else Console.WriteLine("Inventory: " + string.Join(", ", inventory.Select(i => i.Name)));
                 continue;
             }
 
-            // Movement: N/S/E/W
-            string upper = input.ToUpper();
-            if (upper is "N" or "S" or "E" or "W")
+            // Movement
+            var cmdUpper = input.ToUpper();
+            if (cmdUpper is "N" or "S" or "E" or "W" or "NORTH" or "SOUTH" or "EAST" or "WEST")
             {
-                if (currentRoom.Exits.TryGetValue(upper, out Room? nextRoom))
+                if (currentRoom.TryGetExit(cmdUpper, out Room? next) && next != null)
                 {
-                    currentRoom = nextRoom;
+                    currentRoom = next;
                     PrintRoom(currentRoom);
                 }
                 else
@@ -120,26 +74,38 @@ class Program
             // TAKE <item>
             if (input.StartsWith("TAKE ", StringComparison.OrdinalIgnoreCase))
             {
-                string itemName = input.Substring(5).Trim().ToLower();
+                string itemId = input.Substring(5).Trim();
 
-                if (string.IsNullOrWhiteSpace(itemName))
+                if (currentRoom.TryRemoveItem(itemId, out Item? pickedUp) && pickedUp != null)
                 {
-                    Console.WriteLine("Take what?");
+                    inventory.Add(pickedUp);
+                    Console.WriteLine($"You took the {pickedUp.Name}.");
+                }
+                else
+                {
+                    Console.WriteLine($"There is no '{itemId}' here.");
+                }
+                continue;
+            }
+
+            // DROP <item>
+            if (input.StartsWith("DROP ", StringComparison.OrdinalIgnoreCase))
+            {
+                string itemId = input.Substring(5).Trim().ToLower();
+
+                Item? item = inventory.FirstOrDefault(i =>
+                    i.Id.Equals(itemId, StringComparison.OrdinalIgnoreCase) ||
+                    i.Name.Equals(itemId, StringComparison.OrdinalIgnoreCase));
+
+                if (item == null)
+                {
+                    Console.WriteLine($"You don’t have '{itemId}'.");
                     continue;
                 }
 
-                // Find item in room (case-insensitive)
-                string? found = currentRoom.Items.FirstOrDefault(i => i.Equals(itemName, StringComparison.OrdinalIgnoreCase));
-
-                if (found == null)
-                {
-                    Console.WriteLine($"There is no '{itemName}' here.");
-                    continue;
-                }
-
-                currentRoom.Items.Remove(found);
-                inventory.Add(found);
-                Console.WriteLine($"You took the {found}.");
+                inventory.Remove(item);
+                currentRoom.AddItem(item);
+                Console.WriteLine($"You dropped the {item.Name}.");
                 continue;
             }
 
@@ -153,7 +119,7 @@ class Program
         Console.WriteLine(room.Description);
 
         if (room.Items.Count > 0)
-            Console.WriteLine("You see: " + string.Join(", ", room.Items));
+            Console.WriteLine("You see: " + string.Join(", ", room.Items.Select(i => i.Name)));
 
         if (room.Exits.Count > 0)
             Console.WriteLine("Exits: " + string.Join(", ", room.Exits.Keys));
